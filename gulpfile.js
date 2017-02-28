@@ -59,6 +59,18 @@ function runTarmac() {
 		])
 		.pipe(plugins.concat('tarmac.js'))
 		.pipe(gulp.dest('./build/'));
+	
+	gulp.src([
+			tarmacDir + 'class.js',
+			tarmacDir + 'inputemitter.js',
+			tarmacDir + 'rgbcolor.js',
+			tarmacDir + 'canvg.js',
+			tarmacDir + 'transform.js',
+			tarmacDir + 'stackblur.js',
+			tarmacDir + 'tarmic.js'
+		])
+		.pipe(plugins.concat('tarmic.js'))
+		.pipe(gulp.dest('./build/'));
 }
 
 gulp.task('tarmac', runTarmac);

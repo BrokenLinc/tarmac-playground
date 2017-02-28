@@ -2,7 +2,7 @@
 
 	var emitter = new EventEmitter();
 
-	$.detectSwipe.threshold = 60;
+	$.detectSwipe.threshold = 40;
 	FastClick.attach(document.body);
 
 	var input = {

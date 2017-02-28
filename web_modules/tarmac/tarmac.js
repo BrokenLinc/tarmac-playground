@@ -47,14 +47,14 @@
 
 	//private utility methods
 	var add_transform = function(transform, target) {
-		target.translate(transform.x, transform.y);
-		target.rotate(transform.r);
-		target.scale(transform.sx, transform.sy);
+		Boolean(transform.x || transform.y) && target.translate(transform.x, transform.y);
+		Boolean(transform.r) && target.rotate(transform.r);
+		Boolean(transform.sx !== 1 || transform.sy !== 1) && target.scale(transform.sx, transform.sy);
 	};
 	var remove_transform = function(transform, target) {
-		target.scale(1/transform.sx, 1/transform.sy);
-		target.rotate(-transform.r);
-		target.translate(-transform.x, -transform.y);
+		Boolean(transform.sx !== 1 || transform.sy !== 1) && target.scale(1/transform.sx, 1/transform.sy);
+		Boolean(transform.r) && target.rotate(-transform.r);
+		Boolean(transform.x || transform.y) && target.translate(-transform.x, -transform.y);
 	};
 
 	var GameEntity = Class.extend({
@@ -67,6 +67,8 @@
 		visible: true,
 		construct: function(spec) {
 			this.entities = new Array();
+
+			this.id = Math.floor(Math.random() * 100000);
 
 			for(prop in spec) {
 				this[prop] = spec[prop];
@@ -102,7 +104,7 @@
 			}
 			return this;
 		},
-		process: function(t) {
+		process: function(t, dt) {
 			var transform_cache = {
 				x:this.x, y:this.y, r:this.rotation,
 				sx:this.scale * (this.isMirrored? -1 : 1),
@@ -110,19 +112,19 @@
 			};
 
 			add_transform(transform_cache, app.mat);
-			this.adjust && this.adjust(t);
-			this.processChildren(t);
+			this.adjust && this.adjust(t, dt);
+			this.processChildren(t, dt);
 			remove_transform(transform_cache, app.mat);
 
 			return this;
 		},
-		processChildren: function(t) {
+		processChildren: function(t, dt) {
 			for(var i = 0; i < this.entities.length; i += 1) {
-				this.entities[i].process(t);
+				this.entities[i].process(t, dt);
 			}
 			return this;
 		},
-		update: function(t) {
+		update: function(t, dt) {
 			var transform_cache = {
 				x:this.x, y:this.y, r:this.rotation,
 				sx:this.scale * (this.isMirrored? -1 : 1),
@@ -130,18 +132,21 @@
 			};
 
 			add_transform(transform_cache, app.ctx);
-			if(this.visible) this.draw && this.draw(t);
-			this.updateChildren(t);
-			if(this.visible) this.postProcess && this.postProcess(t);
+			if(this.visible) this.draw && this.draw(app.ctx, t, dt);
+			this.updateChildren(t, dt);
+			if(this.visible) this.postProcess && this.postProcess(t, dt);
 			remove_transform(transform_cache, app.ctx);
 
 			return this;
 		},
-		updateChildren: function(t) {
+		updateChildren: function(t, dt) {
 			for(var i = 0; i < this.entities.length; i += 1) {
-				this.entities[i].update(t);
+				this.entities[i].update(t, dt);
 			}
 			return this;
+		},
+		getMouse: function() {
+			return app.mat.globalToLocal(app.mouse);
 		}
 	});
 
@@ -151,14 +156,14 @@
 			this.viewportWidth = spec.viewportWidth || 800;
 			this.viewportHeight = spec.viewportHeight || 450;
 		},
-		process: function(t) {
+		process: function(t, dt) {
 			var w = app.canvas.width;
 			var h = app.canvas.height;
 			this.x = w/2;
 			this.y = h/2;
 			this.scale = Math.min(w/this.viewportWidth, h/this.viewportHeight);
 
-			return this._super(t);
+			return this._super(t, dt);
 		}
 	});
 
@@ -169,7 +174,7 @@
 
 			this._super(spec);
 		},
-		adjust: function(t) {
+		adjust: function(t, dt) {
 			if(this.animation) {
 				var keyframe = this.animation.keyframes[this.animation_keyframe_index];
 				if((new Date()).getTime() - this.animation_keyframe_index_start_time > (keyframe.d || this.animation.d)) {
@@ -186,10 +191,10 @@
 					if(this.animation) keyframe = this.animation.keyframes[this.animation_keyframe_index];
 				}
 				if(this.animation) this.frame = $.extend(this.frame, keyframe)
-				this.onAnimate && this.onAnimate(t);
+				this.onAnimate && this.onAnimate(t, dt);
 			}
 		},
-		draw: function(t) {
+		draw: function(ctx, t, dt) {
 			app.draw_resource(this.resource, this.frame);
 		},
 		play: function(animationKey, repeat, complete) {
@@ -215,17 +220,56 @@
 	var Circle = GameEntity.extend({
 		radius: 100,
 		fill: '#888',
+		strokeColor: '#444',
+		strokeWidth: 0,
 		construct: function(spec) {
 			this._super(spec);
 		},
-		draw: function(t) {
-			app.ctx.beginPath();
-			app.ctx.lineWidth = 0;
-			app.ctx.arc(0, 0, this.radius, 0, 2 * Math.PI, false);
-			app.ctx.fillStyle = this.fill;
-			app.ctx.fill();
-			// app.ctx.strokeStyle = '#003300';
-			// app.ctx.stroke();
+		draw: function(ctx, t, dt) {
+			ctx.beginPath();
+			ctx.lineWidth = 0;
+			ctx.arc(0, 0, this.radius, 0, 2 * Math.PI, false);
+			ctx.fillStyle = this.fill;
+			ctx.fill();
+
+			if(this.strokeWidth) {
+				ctx.strokeStyle = this.strokeColor;
+				ctx.lineWidth = this.strokeWidth;
+				ctx.stroke();
+			}
+
+			return this;
+		}
+	});
+
+	var Polygon = GameEntity.extend({
+		points: 3,
+		radius: 100,
+		fill: '#888',
+		strokeColor: '#444',
+		strokeWidth: 0,
+		construct: function(spec) {
+			this._super(spec);
+		},
+		draw: function(ctx, t, dt) {
+			ctx.beginPath();
+			ctx.lineWidth = 0;
+
+			// http://jsfiddle.net/tohan/8vwjn4cx/
+			var i, angle;
+			for (i = 0; i <= this.points; i++) {
+				angle = i * 2 * Math.PI / this.points - Math.PI / 2;
+				ctx.lineTo(this.radius * Math.cos(angle), this.radius * Math.sin(angle));
+			}
+
+			ctx.fillStyle = this.fill;
+			ctx.fill();
+
+			if(this.strokeWidth) {
+				ctx.strokeStyle = this.strokeColor;
+				ctx.lineWidth = this.strokeWidth;
+				ctx.stroke();
+			}
 
 			return this;
 		}
@@ -235,17 +279,77 @@
 		width: 100,
 		height: 100,
 		fill: '#888',
+		strokeColor: '#444',
+		strokeWidth: 0,
 		construct: function(spec) {
 			this._super(spec);
 		},
-		draw: function(t) {
-			app.ctx.beginPath();
-			app.ctx.lineWidth = 0;
-			app.ctx.fillStyle = this.fill;
-			app.ctx.fillRect(-this.width/2, -this.height/2, this.width, this.height);
-			// app.ctx.strokeStyle = '#003300';
-			// app.ctx.stroke();
+		draw: function(ctx, t, dt) {
+			ctx.beginPath();
+			ctx.lineWidth = 0;
+			ctx.fillStyle = this.fill;
+			ctx.fillRect(-this.width/2, -this.height/2, this.width, this.height);
 
+			if(this.strokeWidth) {
+				ctx.strokeStyle = this.strokeColor;
+				ctx.lineWidth = this.strokeWidth;
+				ctx.strokeRect(-this.width/2, -this.height/2, this.width, this.height);
+			}
+
+			return this;
+		}
+	});
+
+	var RoundedRect = GameEntity.extend({
+		width: 100,
+		height: 100,
+		fill: '#888',
+		radius: 25,
+		strokeColor: '#444',
+		strokeWidth: 0,
+		construct: function(spec) {
+			this._super(spec);
+		},
+		draw_rounded_rect: function(ctx, x, y, width, height, radius, fill, strokeWidth, strokeColor) {
+			// if (typeof stroke == 'undefined') {
+			// 	stroke = true;
+			// }
+			if (typeof radius === 'undefined') {
+				radius = 5;
+			}
+			if (typeof radius === 'number') {
+				radius = {tl: radius, tr: radius, br: radius, bl: radius};
+			} else {
+				var defaultRadius = {tl: 0, tr: 0, br: 0, bl: 0};
+				for (var side in defaultRadius) {
+					radius[side] = radius[side] || defaultRadius[side];
+				}
+			}
+			if (fill) {
+				app.ctx.fillStyle = this.fill;
+			}
+			ctx.beginPath();
+			ctx.moveTo(x + radius.tl, y);
+			ctx.lineTo(x + width - radius.tr, y);
+			ctx.quadraticCurveTo(x + width, y, x + width, y + radius.tr);
+			ctx.lineTo(x + width, y + height - radius.br);
+			ctx.quadraticCurveTo(x + width, y + height, x + width - radius.br, y + height);
+			ctx.lineTo(x + radius.bl, y + height);
+			ctx.quadraticCurveTo(x, y + height, x, y + height - radius.bl);
+			ctx.lineTo(x, y + radius.tl);
+			ctx.quadraticCurveTo(x, y, x + radius.tl, y);
+			ctx.closePath();
+			if (fill) {
+				ctx.fill();
+			}
+			if(strokeWidth) {
+				ctx.strokeStyle = strokeColor;
+				ctx.lineWidth = strokeWidth;
+				ctx.stroke();
+			}
+		},
+		draw: function(ctx, t, dt) {
+			this.draw_rounded_rect(ctx, -this.width/2, -this.height/2, this.width, this.height, this.radius, this.fill, this.strokeWidth, this.strokeColor);
 			return this;
 		}
 	});
@@ -259,28 +363,33 @@
 		construct: function(spec) {
 			this._super(spec);
 		},
-		draw: function(t) {
-			app.ctx.font = this.size + 'px ' + this.font;
-			app.ctx.fillStyle = this.fill;
-			app.ctx.textAlign = this.align;
-			app.ctx.fillText(this.value, 0,0); 
+		draw: function(ctx, t, dt) {
+			ctx.font = this.size + 'px ' + this.font;
+			ctx.fillStyle = this.fill;
+			ctx.textAlign = this.align;
+			ctx.fillText(this.value, 0, this.size * 0.33333); 
 
 			return this;
 		}
 	});
 
-
-
 	//Singleton App & Public Namespaces
 	var app = new GameEntity();
 	app.ether = new EventEmitter();
+	app.mouse = {
+		x: 0,
+		y: 0,
+		isDown: false
+	};
 	app.GameEntity = GameEntity;
 	app.Scene = Scene;
 	app.Sprite = Sprite;
 	app.shapes = {
 		Circle: Circle,
 		Rect: Rect,
-		Text: Text
+		RoundedRect: RoundedRect,
+		Text: Text,
+		Polygon: Polygon
 	};
 	app.viewportPresets = {
 		iPhone: {
@@ -295,7 +404,8 @@
 	app.setup = function(_spec) {
 		var spec = _spec || {};
 
-		var last_update;
+		var adjust_interval = 20;
+		var last_update = new Date().getTime();
 
 		//global init
 		app.background = spec.background || '#000';
@@ -320,17 +430,30 @@
 			doResizeCanvas = true;
 		}).trigger('resize');
 
+		//cache mouse position & state
+		$(app.canvas).on('mousemove', function(e){
+			app.mouse.x = e.offsetX;
+			app.mouse.y = e.offsetY;
+		}).on('mousedown', function(e){
+			app.mouse.isDown = true;
+			app.ether.trigger('MOUSE_DOWN', e);
+		}).on('contextmenu', function(e){
+			app.ether.trigger('CONTEXT_MENU', e);
+			return false;
+		}).on('mouseup mouseleave', function(e){
+			app.mouse.isDown = false;
+			app.ether.trigger('MOUSE_UP', e);
+		});
+
 		//preloader
 		var isPreloaded = false;
 
 		//game loopage
 		var start_game_loop = function() {
-			if(last_update) app.fps = 1000/((new Date()).getTime() - last_update.getTime());
 			game_loop();
 			game_loop_timeout = setTimeout(function(){
 				window.requestAnimationFrame(start_game_loop);
-			}, 20);	//throttling around 50fps seems to keep my MacBook fan from going nuts
-			last_update = new Date();
+			}, adjust_interval);	//throttling fps seems to keep my MacBook fan from going nuts
 		};
 		var game_loop = function() {
 			if(doResizeCanvas) {
@@ -339,11 +462,19 @@
 			}
 			app.clear_canvas();
 
+			var now = new Date().getTime();
+			var dt = now - last_update;
+			if(last_update) app.fps = 1000/dt;
+
 			if(isPreloaded) {
-				var t = new Date().getTime();
-				app.process(t);
-				app.update(t);
+				app.process(now, dt/30);
+
+				now = new Date().getTime();
+				dt = now - last_update;
+				app.update(now, dt/30);
 			}
+
+			last_update = now;
 		};
 
 		//begin
